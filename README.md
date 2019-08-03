@@ -5,6 +5,7 @@
 
 ## Environments
 - macOS 10.14.5
+- Ubuntu 19.04 Server
 
 ## Progress
 - [ ] Lab 1: Booting a PC
