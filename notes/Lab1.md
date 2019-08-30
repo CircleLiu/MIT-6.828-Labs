@@ -542,3 +542,97 @@ boot loader 的链接地址和加载地址是一样的，然而 kernel 的链接
 
 完成了6828转八进制。
 
+### 栈
+
+最后这部分，要研究C语言是如何在x86框架上使用堆栈的。需要查看指令寄存器(IP)的值的变化。
+
+#### Exercise 9
+
+> 研究内核是在哪初始化堆栈，找出堆栈存放在内存的位置。内核是如何保存一块空间给堆栈的？堆栈指针指向这块区域的哪儿？
+
+看了几个文件以后，发现在 `kern/entry.S` 中提到了设置堆指针和栈指针。
+
+```assembly
+    # Clear the frame pointer register (EBP)
+    # so that once we get into debugging C code,
+    # stack backtraces will be terminated properly.
+    movl    $0x0,%ebp            # nuke frame pointer
+
+    # Set the stack pointer
+    movl    $(bootstacktop),%esp
+```
+
+x86堆栈指针(esp寄存器)指向堆栈正在使用的最低位置，低于这个位置的空间还没使用。ebp寄存器(基址指针寄存器)与程序有关。详细的内容可以看 CSAPP。
+
+#### Exercise 10
+
+现在需要实现mon_backtrace()这个函数，需要显示ebp，eip 和 args。ebp是基址指针，eip是返回指令指针。
+
+```c
+int
+mon_backtrace(int argc, char **argv, struct Trapframe *tf)
+{
+	// Your code here.
+	struct Eipdebuginfo info;
+
+	uint32_t arg[4];
+	uint32_t* ebp = (uint32_t*)read_ebp();
+    	cprintf("Stack backtrace:\n");
+	while(ebp != NULL)
+	{
+		uint32_t eip = *(ebp + 1);
+		for(int i = 0; i < 4; i++)
+			arg[i] = *(ebp + i + 2);
+		cprintf("ebp %08x eip %08x args ", ebp, eip);
+		for(int i = 0; i < 4; i++)
+			cprintf("%08x ", arg[i]);
+		cprintf("\n");
+		if(debuginfo_eip(eip, &info) == 0)
+		{
+			cprintf("%s:%d: ", info.eip_file, info.eip_line);
+			cprintf("%.*s", info.eip_fn_namelen, info.eip_fn_name);
+			cprintf("+%d\n", eip - (uint32_t)info.eip_fn_addr);
+		}
+		else
+			cprintf("Error happened when reading symbol table\n");
+		
+		ebp = (uint32_t*) (*ebp);
+	}
+	return 0;
+}
+```
+
+#### Exercise 11
+
+修改上面实现的backtrace，要显示详细的函数地址。可以使用 `kern/kdebug.c` 的 debuginfo_eip()。在查看debuginfo_eip时发现其中有一段代码需要填写。这段代码是填写eip_line。这里用到了写好的二分查找。
+
+```c
+	// Search within [lline, rline] for the line number stab.
+	// If found, set info->eip_line to the right line number.
+	// If not found, return -1.
+	//
+	// Hint:
+	//	There's a particular stabs type used for line numbers.
+	//	Look at the STABS documentation and <inc/stab.h> to find
+	//	which one.
+	// Your code here.
+	stab_binsearch(stabs, &lline, &rline, N_SLINE, addr);
+    if(lline <= rline){
+        info->eip_line = stabs[rline].n_desc;
+    } else {
+        info->eip_line = -1;
+		}
+```
+
+#### Exercise 12
+
+将backtrace嵌入终端中，使其可以被调用。只需要修改 `kern/monitor.c` 的
+
+```c
+static struct Command commands[] = {
+	{ "help", "Display this list of commands", mon_help },
+	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+	{ "backtrace", "Display a listing of function call frames", mon_backtrace}
+};
+```
+
